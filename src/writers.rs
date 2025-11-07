@@ -91,6 +91,7 @@ pub struct SystemInfo {
     pub os_version: String,
     pub kernel: String,
     pub hostname: String,
+    pub gpu: Vec<String>,
 }
 
 impl SystemInfo {
@@ -105,6 +106,7 @@ impl SystemInfo {
             .iter()
             .map(|cpu| format!("{} {}@{:.0}MHz", cpu.brand(), cpu.name(), cpu.frequency()))
             .collect::<Vec<String>>();
+        let gpu_info = Self::detect_gpu();
         SystemInfo {
             cpu: cpu_info,
             memory: format!(
@@ -115,7 +117,91 @@ impl SystemInfo {
             os_version: System::os_version().ok_or("N/A").unwrap(),
             kernel: System::kernel_version().ok_or("N/A").unwrap(),
             hostname: System::host_name().ok_or("N/A").unwrap(),
+            gpu: gpu_info,
         }
+    }
+
+    fn detect_gpu() -> Vec<String> {
+        let mut gpus = Vec::new();
+
+        if cfg!(target_os = "linux") {
+            if let Ok(output) = std::process::Command::new("lspci")
+                .arg("-nn")
+                .output()
+            {
+                if let Ok(stdout) = String::from_utf8(output.stdout) {
+                    for line in stdout.lines() {
+                        if line.contains("VGA") || line.contains("3D") || line.contains("Display") {
+                            if let Some(device_info) = line.split(':').nth(2) {
+                                let cleaned = device_info.trim().to_string();
+                                if !cleaned.is_empty() {
+                                    gpus.push(cleaned);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if gpus.is_empty() {
+                if let Ok(output) = std::process::Command::new("nvidia-smi")
+                    .arg("--query-gpu=name")
+                    .arg("--format=csv,noheader")
+                    .output()
+                {
+                    if output.status.success() {
+                        if let Ok(stdout) = String::from_utf8(output.stdout) {
+                            for line in stdout.lines() {
+                                let gpu_name = line.trim();
+                                if !gpu_name.is_empty() {
+                                    gpus.push(gpu_name.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if cfg!(target_os = "macos") {
+            if let Ok(output) = std::process::Command::new("system_profiler")
+                .arg("SPDisplaysDataType")
+                .output()
+            {
+                if let Ok(stdout) = String::from_utf8(output.stdout) {
+                    for line in stdout.lines() {
+                        if line.contains("Chipset Model:") {
+                            if let Some(gpu_name) = line.split(':').nth(1) {
+                                gpus.push(gpu_name.trim().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        } else if cfg!(target_os = "windows") {
+            if let Ok(output) = std::process::Command::new("wmic")
+                .arg("path")
+                .arg("win32_VideoController")
+                .arg("get")
+                .arg("name")
+                .output()
+            {
+                if let Ok(stdout) = String::from_utf8(output.stdout) {
+                    for (idx, line) in stdout.lines().enumerate() {
+                        if idx > 0 {
+                            let gpu_name = line.trim();
+                            if !gpu_name.is_empty() && gpu_name != "Name" {
+                                gpus.push(gpu_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if gpus.is_empty() {
+            gpus.push("N/A".to_string());
+        }
+
+        gpus
     }
 }
 
