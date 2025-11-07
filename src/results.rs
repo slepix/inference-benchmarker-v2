@@ -243,19 +243,27 @@ impl BenchmarkResults {
     fn quantile_duration(&self, mut data: Vec<Duration>, quantile: f64) -> anyhow::Result<f64> {
         if self.is_ready() {
             data.sort();
-            let i = (quantile * (data.len() - 1) as f64).floor();
-            let delta = (data.len() - 1) as f64 * quantile - i;
-            if i as usize >= data.len() {
+
+            if data.is_empty() {
                 return Err(anyhow::anyhow!(NoResponses));
             }
-            let quantile = (1. - delta) * data[i as usize].as_secs_f64()
-                + delta * data[i as usize + 1].as_secs_f64();
-            Ok(quantile)
+
+            if data.len() == 1 {
+                return Ok(data[0].as_secs_f64());
+            }
+
+            let i = (quantile * (data.len() - 1) as f64).floor();
+            let delta = (data.len() - 1) as f64 * quantile - i;
+
+            let lower = data[i as usize].as_secs_f64();
+            let upper = data[(i as usize + 1).min(data.len() - 1)].as_secs_f64();
+
+            Ok((1. - delta) * lower + delta * upper)
         } else {
             Err(anyhow::anyhow!(NoResponses))
         }
     }
-}
+} // <-- ✅ This was missing!
 
 impl Debug for BenchmarkResults {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -355,6 +363,7 @@ mod test {
     use super::*;
     use crate::requests::TextGenerationRequest;
     use std::sync::Arc;
+
     #[test]
     fn test_time_to_first_token_percentile() {
         let request = Arc::from(TextGenerationRequest {
@@ -363,6 +372,7 @@ mod test {
             num_prompt_tokens: 10,
             num_decode_tokens: None,
         });
+
         let mut response1 = TextGenerationAggregatedResponse::new(request.clone());
         response1.start_time = Some(tokio::time::Instant::now());
         response1.end_time =
