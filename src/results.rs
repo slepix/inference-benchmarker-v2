@@ -263,7 +263,7 @@ impl BenchmarkResults {
             Err(anyhow::anyhow!(NoResponses))
         }
     }
-} // <-- ✅ This was missing!
+} 
 
 impl Debug for BenchmarkResults {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
